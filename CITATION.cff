@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+title: "ctbench: a matched-pair constant-time RTL benchmark and reference checker"
+message: "If you use this corpus or checker in academic work, please cite it."
+type: software
+authors:
+  - alias: nickharris808
+    website: "https://github.com/nickharris808"
+repository-code: "https://github.com/nickharris808/ctbench"
+url: "https://huggingface.co/spaces/nickh007/hw-verify"
+abstract: >-
+  A benchmark corpus and reference checker for constant-time properties of RTL. Every
+  safe design ships beside a leaky twin with an identical interface, so a tool earns a
+  pair only by separating both halves; an out-of-remit control is genuinely
+  constant-time and functionally wrong, so a tool that flags it is recorded as crying
+  wolf. Scoring ranks soundness first: a tool that reports one leaky design safe ranks
+  below every sound tool regardless of accuracy. The checker returns a third verdict,
+  UNKNOWN, for designs it cannot read, rather than reporting an unanalysed design as
+  safe.
+keywords:
+  - constant-time
+  - side-channel
+  - hardware security
+  - verilog
+  - benchmark
+  - formal verification
+license: Apache-2.0
+version: 1.1.0
+date-released: "2026-07-28"

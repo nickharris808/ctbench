@@ -204,16 +204,31 @@ class Explanation:
 
 
 def explain(mod: Module, verdict: Verdict, limit_per_secret: int = 1) -> Explanation:
-    """Build an explanation: one shortest path per reaching secret by default."""
+    """Build an explanation: one shortest path per reaching secret by default.
+
+    The shortest path is always found first with BFS and always included, even when
+    more were requested. `all_paths` is depth-bounded, so on a long chain it can come
+    back empty while a path demonstrably exists -- which meant asking for *more* paths
+    returned *fewer*, and an empty list reads as "no path", which is the opposite of
+    a LEAKY verdict's meaning. Found by a stress test on a 50 000-edge netlist:
+    `shortest_path` returned a path of length 50 000 and `all_paths` returned none.
+    """
     paths: list[Path] = []
     truncated = False
     for secret in verdict.reaching:
-        if limit_per_secret == 1:
-            p = shortest_path(mod, verdict.observation, secret)
-            if p:
-                paths.append(p)
-        else:
-            found = all_paths(mod, verdict.observation, secret, limit=limit_per_secret)
-            paths.extend(found)
-            truncated = truncated or len(found) >= limit_per_secret
+        first = shortest_path(mod, verdict.observation, secret)
+        if first is None:
+            # The verdict says this secret reaches the observation, so BFS must find
+            # a path. If it does not, the graph and the verdict disagree and saying
+            # nothing would hide that.
+            continue
+        paths.append(first)
+        if limit_per_secret > 1:
+            extra = [
+                p for p in all_paths(mod, verdict.observation, secret,
+                                     limit=limit_per_secret)
+                if p.signals != first.signals
+            ]
+            paths.extend(extra[: limit_per_secret - 1])
+            truncated = truncated or len(extra) >= limit_per_secret - 1
     return Explanation(verdict=verdict, paths=paths, truncated=truncated)

@@ -23,7 +23,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "ctbench" / "fixtures"
-DOCS = ["README.md", "TUTORIAL.md", "SCOPE.md", "TROUBLESHOOTING.md", "CLI.md"]
+DOCS = ["README.md", "TUTORIAL.md", "SCOPE.md", "TROUBLESHOOTING.md", "CLI.md",
+        "FAQ.md", "ARCHITECTURE.md", "CONTRIBUTING.md"]
 
 
 @pytest.fixture(scope="module")
@@ -230,3 +231,87 @@ def test_the_readme_precommit_example_names_a_declared_hook():
     used = set(re.findall(r"- id: ([\w-]+)", readme))
     assert used, "the README shows no hook id"
     assert used <= declared, f"README references undeclared hook(s): {used - declared}"
+
+
+# ---------------------------------------------------------------------------
+# The newer docs make checkable claims too.
+# ---------------------------------------------------------------------------
+
+def test_architecture_lists_every_refusal_type_that_exists():
+    """A refusal the code can raise but the architecture notes omit is a surprise."""
+    import inspect
+
+    from ctbench import cone, netlist
+
+    documented = (ROOT / "ARCHITECTURE.md").read_text()
+    for module in (cone, netlist):
+        for name, obj in vars(module).items():
+            if (inspect.isclass(obj) and issubclass(obj, cone.AnalysisRefused)
+                    and obj is not cone.AnalysisRefused and not name.startswith("_")):
+                assert name in documented, (
+                    f"{name} is a refusal type but ARCHITECTURE.md never mentions it"
+                )
+
+
+def test_architecture_names_only_modules_that_exist():
+    import re
+
+    doc = (ROOT / "ARCHITECTURE.md").read_text()
+    for mod in set(re.findall(r"`(\w+)\.py`", doc)):
+        # Test modules live in tests/, package modules in ctbench/. Both are real
+        # files the document names, so both count.
+        assert ((ROOT / "ctbench" / f"{mod}.py").is_file()
+                or (ROOT / "tests" / f"{mod}.py").is_file()), (
+            f"ARCHITECTURE.md documents {mod}.py, which does not exist"
+        )
+
+
+def test_the_documented_test_count_is_the_real_one():
+    """CONTRIBUTING quotes a count; a stale one makes a contributor doubt their setup.
+
+    Counted by *collection*, not by running the suite: running it from inside itself
+    re-enters this test, which re-runs the suite, and so on until the machine gives up.
+    Found the direct way -- the first version of this test hung.
+    """
+    import re
+
+    doc = (ROOT / "CONTRIBUTING.md").read_text()
+    claimed = re.search(r"pytest tests -q\s+#\s*(\d+) tests", doc)
+    if not claimed:
+        pytest.skip("no test count claimed")
+    r = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests", "--collect-only", "-q",
+         "-p", "no:cacheprovider"],
+        capture_output=True, text=True, cwd=ROOT, check=False,
+    )
+    m = re.search(r"(\d+) tests? collected", r.stdout)
+    assert m, r.stdout[-400:]
+    assert int(claimed.group(1)) == int(m.group(1)), (
+        f"CONTRIBUTING.md claims {claimed.group(1)} tests, there are {m.group(1)}"
+    )
+
+
+def test_citation_metadata_is_valid_and_matches_the_package():
+    import yaml
+
+    from ctbench import __version__
+
+    p = ROOT / "CITATION.cff"
+    assert p.is_file()
+    cff = yaml.safe_load(p.read_text())
+    for key in ("cff-version", "title", "authors", "license", "version"):
+        assert cff.get(key), f"CITATION.cff is missing {key}"
+    assert cff["version"] == __version__, (
+        f"CITATION.cff says version {cff['version']}, package says {__version__}"
+    )
+    assert cff["license"] == "Apache-2.0"
+
+
+def test_the_faq_does_not_promise_a_pypi_install_that_does_not_exist():
+    """`pip install ctbench` 404s; the docs must say the git URL instead."""
+    faq = (ROOT / "FAQ.md").read_text()
+    import re
+    for m in re.finditer(r"pip install ([a-z0-9-]+)\n", faq):
+        assert m.group(1).startswith("git+"), (
+            f"FAQ promises `pip install {m.group(1)}`, which is not on any index"
+        )

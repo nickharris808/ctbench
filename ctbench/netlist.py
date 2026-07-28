@@ -127,6 +127,25 @@ class UnknownCell(NetlistError):
         )
 
 
+class UndirectedPort(NetlistError):
+    """A connected cell port with no declared direction.
+
+    Refused rather than assumed. If the port is an output and we guess "input", the
+    cell contributes no dependency edges, and a secret flowing through it disappears
+    from the graph -- a leaky design reported clean.
+    """
+
+    def __init__(self, cell: str, port: str, cell_type: str, module: str) -> None:
+        self.cell, self.port = cell, port
+        super().__init__(
+            f"port {port!r} of cell {cell!r} (type {cell_type!r}) in module {module!r} "
+            f"has no declared direction. Guessing would risk deleting every dependency "
+            f"edge through this cell, which could turn a leaky design into a clean "
+            f"verdict, so no verdict is returned. Re-export the netlist with a current "
+            f"Yosys: `write_json` records port_directions for every connected port."
+        )
+
+
 def _bits_of(port: dict) -> list:
     """The bit identifiers of a port. Constants appear as the strings '0'/'1'/'x'."""
     return port.get("bits", []) if isinstance(port, dict) else []
@@ -170,6 +189,14 @@ def parse_netlist(data: dict, top: str | None = None) -> Module:
         )
 
     m = modules[top]
+    if not isinstance(m, dict):
+        # Otherwise the first `.get` raises AttributeError, which `check_netlist`
+        # does not catch -- so malformed input would surface as a traceback rather
+        # than as the UNKNOWN verdict every other refusal produces.
+        raise NetlistError(
+            f"module {top!r} is not an object (got {type(m).__name__}). This does not "
+            f"look like Yosys `write_json` output."
+        )
     mod = Module(name=top)
 
     # Map every bit id to a readable name. Ports win over internal nets so that
@@ -205,7 +232,20 @@ def parse_netlist(data: dict, top: str | None = None) -> Module:
         if direction in _OUTPUT_DIRECTIONS:
             mod.outputs.extend([pname, *names])
 
-    for cname, cell in (m.get("cells", {}) or {}).items():
+    cells = m.get("cells", {}) or {}
+    if not isinstance(cells, dict):
+        raise NetlistError(
+            f"module {top!r}: 'cells' is not an object (got {type(cells).__name__})."
+        )
+    for cname, cell in cells.items():
+        # Every malformed shape below would otherwise raise AttributeError, which
+        # `check_netlist` does not catch -- so junk input would surface as a traceback
+        # instead of the UNKNOWN verdict every other refusal produces.
+        if not isinstance(cell, dict):
+            raise NetlistError(
+                f"cell {cname!r} in module {top!r} is not an object "
+                f"(got {type(cell).__name__})."
+            )
         ctype = cell.get("type", "")
         if _is_inert(cell):
             continue
@@ -214,10 +254,28 @@ def parse_netlist(data: dict, top: str | None = None) -> Module:
 
         directions = cell.get("port_directions", {}) or {}
         conns = cell.get("connections", {}) or {}
+        if not isinstance(conns, dict) or not isinstance(directions, dict):
+            raise NetlistError(
+                f"cell {cname!r} in module {top!r}: 'connections' and "
+                f"'port_directions' must both be objects."
+            )
         srcs: set[str] = set()
         dsts: list[str] = []
         for port, bits in conns.items():
-            d = directions.get(port, "input")
+            # No default. Assuming "input" for an undeclared port is exactly the
+            # silent-edge-deletion this module exists to prevent: a cell whose *output*
+            # direction is missing would contribute no edges at all, and a design whose
+            # secret flows through that cell would come back CONSTANT_TIME.
+            #
+            # Found by a stress test, not by reasoning: with one such cell among
+            # well-formed ones the graph stays non-empty, so the "no cells" refusal
+            # does not fire and the verdict is confidently wrong.
+            #
+            # Refusing is free in practice -- across 20 real Yosys netlists and 1753
+            # connected ports, every single one carried a direction.
+            if port not in directions:
+                raise UndirectedPort(cname, port, ctype, top)
+            d = directions[port]
             names = [n for n in (name_of(b) for b in bits) if n]
             if d in _OUTPUT_DIRECTIONS:
                 dsts.extend(names)
@@ -259,6 +317,15 @@ def load_netlist(path: str | Path, top: str | None = None) -> Module:
         raw = p.read_text()
     except OSError as exc:
         raise NetlistError(f"cannot read netlist {str(p)!r}: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        # A binary file handed to `--netlist` is a plausible mistake (a `.json` that
+        # is really a compiled artefact, or a truncated download). Left uncaught this
+        # escapes `check_netlist`, which only catches AnalysisRefused, and surfaces as
+        # a traceback rather than the UNKNOWN every other bad input produces.
+        raise NetlistError(
+            f"{str(p)!r} is not text ({exc.reason} at byte {exc.start}). Expected "
+            f"Yosys `write_json` output, which is UTF-8 JSON."
+        ) from exc
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
