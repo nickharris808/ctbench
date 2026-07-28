@@ -313,20 +313,24 @@ is the sound behaviour.
 <!-- portfolio:start -->
 ## Part of the hw-verify toolkit
 
-Five open tools, a dataset, and a browser demo for proving security properties of hardware and bounds checks. They share one boundary: **everything open analyses a design you disclose in full.**
+Open tools for proving security properties of hardware and bounds checks.
+They share one boundary: **everything open analyses a design you disclose in full.**
 
 | Project | What it does |
 |---|---|
-| **▶ [Live demo](https://huggingface.co/spaces/nickh007/hw-verify)** | Try the constant-time checker in your browser — runs the real analyzer via Pyodide |
+| **▶ [Live demo](https://huggingface.co/spaces/nickh007/hw-verify)** | Constant-time checker in your browser — runs the real analyzer via Pyodide |
+| [`hw-verify`](https://github.com/nickharris808/hw-verify) | One install, one command, all three checkers |
 | **`ctbench`** (you are here) | Matched-pair constant-time RTL benchmark + leaderboard |
 | [`patchproof`](https://github.com/nickharris808/patchproof) | Prove a bounds-check fix eliminates *every* violating input |
+| [`patchproof-verify`](https://github.com/nickharris808/patchproof-verify) | Re-check its certificates in Rust, with no shared code |
 | [`ct-mask`](https://github.com/nickharris808/ct-mask) | First-order masking verification by two certificates |
-| [`hw-verify-mcp`](https://github.com/nickharris808/hw-verify-mcp) | MCP server — all three checkers, callable by AI agents |
+| [`hw-verify-mcp`](https://github.com/nickharris808/hw-verify-mcp) | MCP server — the checkers, callable by AI agents |
 | [`ct-audit-action`](https://github.com/nickharris808/ct-audit-action) | GitHub Action — fail a PR on a leaky completion signal |
-| [`hw-verify` dataset](https://huggingface.co/datasets/nickh007/hw-verify) | 49 records, 3 splits, byte-reproducible from these tools |
-| [`hw-verify-static`](https://github.com/nickharris808/hw-verify-static) · [`hw-verify-space`](https://github.com/nickharris808/hw-verify-space) | Source for the live demo (Pyodide) and a fuller Gradio build |
+| [verdicts](https://huggingface.co/datasets/nickh007/hw-verify) · [witness paths](https://huggingface.co/datasets/nickh007/hw-verify-paths) | Two datasets: what each design is, and why |
 
-**The commercial boundary.** Proving a property to a third party who never receives the design — a verdict bound to a commitment of a design that stays hidden — is a different problem and a commercial one. It is not in any of these packages.
+**The commercial boundary.** Proving a property to a third party who never receives
+the design — a verdict bound to a commitment of a design that stays hidden — is a
+different problem and a commercial one. It is not in any of these packages.
 <!-- portfolio:end -->
 
 ## License
