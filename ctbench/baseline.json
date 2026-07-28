@@ -1,0 +1,41 @@
+{
+  "tool": "ctbench reference checker (syntactic cone-of-influence)",
+  "tool_version": "1.0.0",
+  "method": "Fan-in cone of the observation signal, including every enclosing if/case guard condition, intersected with the declared secret inputs. Over-approximate and therefore sound for CONSTANT_TIME; a LEAKY verdict names the reaching secrets.",
+  "environment": {
+    "python": "3.11.14"
+  },
+  "verdicts": {
+    "barrett_ct.v": "CONSTANT_TIME",
+    "barrett_leaky.v": "LEAKY",
+    "barrett_buggy.v": "CONSTANT_TIME",
+    "ct_cmp.v": "CONSTANT_TIME",
+    "cmp_leaky.v": "LEAKY",
+    "ct_div_wide.v": "CONSTANT_TIME",
+    "ct_div_leaky.v": "LEAKY",
+    "ct_gcd.v": "CONSTANT_TIME",
+    "euclid_gcd.v": "LEAKY",
+    "euclid_gcd_repaired.v": "CONSTANT_TIME",
+    "ct_modmul.v": "CONSTANT_TIME",
+    "modmul_leaky.v": "LEAKY",
+    "ct_mul.v": "CONSTANT_TIME",
+    "mul_leaky.v": "LEAKY",
+    "modexp_ct.v": "CONSTANT_TIME",
+    "modexp_leaky.v": "LEAKY",
+    "x25519_fieldmul.v": "CONSTANT_TIME",
+    "x25519_fieldmul_leaky.v": "LEAKY"
+  },
+  "score": {
+    "total": 18,
+    "correct": 18,
+    "accuracy": 1.0,
+    "sound": true,
+    "unsound_verdicts": [],
+    "imprecise_verdicts": [],
+    "abstained": [],
+    "missing": [],
+    "out_of_remit_control_passed": true,
+    "pairs_separated": 8,
+    "pairs_total": 8
+  }
+}

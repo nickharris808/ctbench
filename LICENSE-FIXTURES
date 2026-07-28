@@ -1,0 +1,56 @@
+# Licensing of the ctbench RTL corpus
+
+ctbench ships two kinds of material under two different licences.
+
+## 1. The harness — Apache License 2.0
+
+Everything under `ctbench/` other than `ctbench/fixtures/`, plus the tests and
+packaging, is licensed under the Apache License 2.0.  See `LICENSE`.
+
+## 2. The RTL fixtures — Creative Commons Attribution 4.0 International
+
+The Verilog fixtures in `ctbench/fixtures/` are licensed
+**CC-BY-4.0** (https://creativecommons.org/licenses/by/4.0/), except for the
+third-party derivatives listed in section 3.
+
+A benchmark corpus is only useful if people can copy fixtures into papers, slides
+and competing tools without friction, so the corpus is deliberately licensed more
+permissively than a code licence would allow for prose and figures.  Attribution
+is the only condition: cite ctbench when you evaluate on it.
+
+Suggested citation:
+
+    ctbench: a matched-pair constant-time RTL benchmark corpus, version 1.0.0.
+
+## 3. Third-party derivatives — ISC License (upstream picorv32)
+
+The following fixtures are vendored from, or derived from, the **picorv32**
+project by Claire Wolf, which is distributed under the ISC License:
+
+  - `ctbench/fixtures/pcpi_div.v`            — vendored unmodified
+  - `ctbench/fixtures/pcpi_mul.v`            — vendored unmodified
+  - `ctbench/fixtures/pcpi_div_wiped.v`      — derivative (operand registers cleared on completion)
+  - `ctbench/fixtures/pcpi_div_halfwipe.v`   — derivative (only some operand registers cleared)
+
+These four files remain under the ISC License below, not CC-BY-4.0.  Upstream
+project: https://github.com/YosysHQ/picorv32
+
+    ISC License
+
+    Copyright (C) 2015  Claire Wolf <claire@yosyshq.com>
+
+    Permission to use, copy, modify, and/or distribute this software for any
+    purpose with or without fee is hereby granted, provided that the above
+    copyright notice and this permission notice appear in all copies.
+
+    THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+    WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+    MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+    ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+    WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+    ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+    OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+The two `pcpi_div_*` derivatives modify the upstream module to add or omit
+register clearing on completion.  They are distributed under the same ISC terms
+as the original, with modifications noted in each file header.

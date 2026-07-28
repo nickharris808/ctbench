@@ -1,0 +1,29 @@
+{
+  "submission_version": 1,
+  "tool": "naive-syntactic",
+  "version": "0.1",
+  "url": "",
+  "method": "Flags a design if any secret name appears anywhere in the module body.",
+  "notes": "Illustrative straw tool, included to show what the ranking penalises.",
+  "submitted": "2026-07-28",
+  "verdicts": {
+    "barrett_ct.v": "CONSTANT_TIME",
+    "barrett_leaky.v": "LEAKY",
+    "barrett_buggy.v": "LEAKY",
+    "ct_cmp.v": "CONSTANT_TIME",
+    "cmp_leaky.v": "CONSTANT_TIME",
+    "ct_div_wide.v": "CONSTANT_TIME",
+    "ct_div_leaky.v": "LEAKY",
+    "ct_gcd.v": "CONSTANT_TIME",
+    "euclid_gcd.v": "LEAKY",
+    "euclid_gcd_repaired.v": "CONSTANT_TIME",
+    "ct_modmul.v": "CONSTANT_TIME",
+    "modmul_leaky.v": "LEAKY",
+    "ct_mul.v": "CONSTANT_TIME",
+    "mul_leaky.v": "LEAKY",
+    "modexp_ct.v": "CONSTANT_TIME",
+    "modexp_leaky.v": "LEAKY",
+    "x25519_fieldmul.v": "CONSTANT_TIME",
+    "x25519_fieldmul_leaky.v": "LEAKY"
+  }
+}

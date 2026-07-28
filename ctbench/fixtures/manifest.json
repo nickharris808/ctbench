@@ -1,0 +1,132 @@
+{
+  "benchmark": "ctbench",
+  "version": "1.0.0",
+  "task": "constant_time",
+  "description": "Matched-pair constant-time RTL fixtures. Every constant-time design ships beside a deliberately leaky twin with an identical module interface, so a tool is graded against controls rather than against itself.",
+  "observation_semantics": "A design is CONSTANT_TIME with respect to `observation` when the cycle at which `observation` asserts is independent of every signal listed in `secrets`. A tool must return CONSTANT_TIME or LEAKY for each scored fixture.",
+  "scored": [
+    {
+      "file": "barrett_ct.v", "module": "barrett_ct", "observation": "done",
+      "secrets": ["a"], "expected": "CONSTANT_TIME", "pair": "barrett", "role": "positive",
+      "note": "Barrett modular reduction with a data-oblivious cycle counter."
+    },
+    {
+      "file": "barrett_leaky.v", "module": "barrett_leaky", "observation": "done",
+      "secrets": ["a"], "expected": "LEAKY", "pair": "barrett", "role": "negative",
+      "note": "Completion is skipped when the conditional-subtract is not taken, so timing reveals a magnitude comparison."
+    },
+    {
+      "file": "barrett_buggy.v", "module": "barrett_buggy", "observation": "done",
+      "secrets": ["a"], "expected": "CONSTANT_TIME", "pair": "barrett", "role": "out_of_remit",
+      "note": "OUT-OF-REMIT CONTROL. Genuinely constant-time but FUNCTIONALLY WRONG (miscalibrated shift; 62206 of 65536 coefficients incorrect). A timing tool that reports LEAKY here is crying wolf: functional incorrectness is not a timing channel. This fixture separates serious tools from pattern-matchers."
+    },
+    {
+      "file": "ct_cmp.v", "module": "ct_cmp", "observation": "done",
+      "secrets": ["x", "y"], "expected": "CONSTANT_TIME", "pair": "cmp", "role": "positive",
+      "note": "Tag comparison that always scans all W bits (the memcmp-hardening pattern)."
+    },
+    {
+      "file": "cmp_leaky.v", "module": "cmp_leaky", "observation": "done",
+      "secrets": ["x", "y"], "expected": "LEAKY", "pair": "cmp", "role": "negative",
+      "note": "Early-exit memcmp: completion timing reveals the first-mismatch position."
+    },
+    {
+      "file": "ct_div_wide.v", "module": "ct_div_wide", "observation": "done",
+      "secrets": ["a", "b"], "expected": "CONSTANT_TIME", "pair": "div", "role": "positive",
+      "note": "Restoring divider that always runs the full width."
+    },
+    {
+      "file": "ct_div_leaky.v", "module": "ct_div_leaky", "observation": "done",
+      "secrets": ["a", "b"], "expected": "LEAKY", "pair": "div", "role": "negative",
+      "note": "Identical to ct_div_wide except completion also fires on an early exit when the remainder is exhausted."
+    },
+    {
+      "file": "ct_gcd.v", "module": "ct_gcd", "observation": "done",
+      "secrets": ["a_in", "b_in"], "expected": "CONSTANT_TIME", "pair": "gcd", "role": "positive",
+      "note": "Binary GCD run for a fixed operand-independent iteration count."
+    },
+    {
+      "file": "euclid_gcd.v", "module": "euclid_gcd", "observation": "done",
+      "secrets": ["a_in", "b_in"], "expected": "LEAKY", "pair": "gcd", "role": "negative",
+      "note": "Textbook Euclid: the number of reduction steps, hence the cycle at which done asserts, depends on the operands."
+    },
+    {
+      "file": "euclid_gcd_repaired.v", "module": "euclid_gcd_repaired", "observation": "done",
+      "secrets": ["a_in", "b_in"], "expected": "CONSTANT_TIME", "pair": "gcd", "role": "repaired",
+      "note": "The leaky twin after repair; a tool that flags this has not distinguished the fix from the defect."
+    },
+    {
+      "file": "ct_modmul.v", "module": "ct_modmul", "observation": "done",
+      "secrets": ["a", "b", "m"], "expected": "CONSTANT_TIME", "pair": "modmul", "role": "positive"
+    },
+    {
+      "file": "modmul_leaky.v", "module": "modmul_leaky", "observation": "done",
+      "secrets": ["a", "b", "m"], "expected": "LEAKY", "pair": "modmul", "role": "negative"
+    },
+    {
+      "file": "ct_mul.v", "module": "ct_mul", "observation": "done",
+      "secrets": ["a", "b"], "expected": "CONSTANT_TIME", "pair": "mul", "role": "positive"
+    },
+    {
+      "file": "mul_leaky.v", "module": "mul_leaky", "observation": "done",
+      "secrets": ["a", "b"], "expected": "LEAKY", "pair": "mul", "role": "negative",
+      "note": "Shift-and-add multiplier that skips cycles on zero multiplier bits."
+    },
+    {
+      "file": "modexp_ct.v", "module": "modexp_ct", "observation": "done",
+      "secrets": ["base", "exp", "modulus"], "expected": "CONSTANT_TIME", "pair": "modexp", "role": "positive",
+      "note": "Montgomery-ladder style exponentiation: both branches always execute."
+    },
+    {
+      "file": "modexp_leaky.v", "module": "modexp_leaky", "observation": "done",
+      "secrets": ["base", "exp", "modulus"], "expected": "LEAKY", "pair": "modexp", "role": "negative",
+      "note": "Square-and-multiply: the multiply is skipped on a zero exponent bit, leaking the exponent Hamming weight."
+    },
+    {
+      "file": "x25519_fieldmul.v", "module": "x25519_fieldmul", "observation": "done",
+      "secrets": ["opa", "opb", "modulus"], "expected": "CONSTANT_TIME", "pair": "x25519", "role": "positive"
+    },
+    {
+      "file": "x25519_fieldmul_leaky.v", "module": "x25519_fieldmul_leaky", "observation": "done",
+      "secrets": ["opa", "opb", "modulus"], "expected": "LEAKY", "pair": "x25519", "role": "negative"
+    }
+  ],
+  "unscored": [
+    {
+      "file": "barrett_spec.v", "module": "barrett_spec",
+      "reason": "Combinational reference model with no completion signal; used as the functional oracle for the barrett pair, not as a timing fixture."
+    },
+    {
+      "file": "alu_unprotected.v", "module": "alu_unprotected",
+      "reason": "Fault-detection fixture. Its observable is a data output, which must depend on the operands; grading it under the constant-time task would be a category error."
+    },
+    {
+      "file": "parity_alu.v", "module": "parity_alu",
+      "reason": "Fault-detection fixture (parity-protected ALU), as above."
+    },
+    {
+      "file": "parity_alu_singlebit.v", "module": "parity_alu_singlebit",
+      "reason": "Fault-detection fixture (single-bit parity variant), as above."
+    },
+    {
+      "file": "pcpi_div.v", "module": "picorv32_pcpi_div",
+      "reason": "Secret-residue fixture: the property of interest is whether operand state survives completion, not completion timing. Reserved for a future `secret_residue` task."
+    },
+    {
+      "file": "pcpi_div_wiped.v", "module": "picorv32_pcpi_div",
+      "reason": "Secret-residue fixture (operand registers cleared on completion). Reserved for the `secret_residue` task."
+    },
+    {
+      "file": "pcpi_div_halfwipe.v", "module": "picorv32_pcpi_div",
+      "reason": "Secret-residue fixture (only some operand registers cleared) — the discriminating twin. Reserved for the `secret_residue` task."
+    },
+    {
+      "file": "pcpi_mul.v", "module": "picorv32_pcpi_mul",
+      "reason": "Secret-residue fixture. Reserved for the `secret_residue` task."
+    },
+    {
+      "file": "tb_ct.v", "module": "tb_ct",
+      "reason": "Simulation testbench, not a design under test."
+    }
+  ]
+}
