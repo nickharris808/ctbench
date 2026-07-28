@@ -67,6 +67,28 @@ class UnsupportedConstruct(AnalysisRefused):
         )
 
 
+class NoModuleFound(AnalysisRefused):
+    """The source contains no `module ... endmodule` at all."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "no module found: the source contains no 'module ... endmodule' block. "
+            "Check the file is Verilog and is not empty or truncated."
+        )
+
+
+class ModuleNotFound(AnalysisRefused):
+    """The named module is not in this file; the ones that are get listed."""
+
+    def __init__(self, wanted: str, available: list[str]) -> None:
+        self.wanted, self.available = wanted, available
+        super().__init__(
+            f"module {wanted!r} not found. This file defines: "
+            f"{', '.join(available) or '(none)'}. "
+            f"Pass --module with one of those, or omit --module to analyse the first."
+        )
+
+
 class UnknownObservation(AnalysisRefused):
     """The named observation is not a signal of this module at all."""
 
@@ -353,7 +375,7 @@ def parse(src: str, module_name: str | None = None) -> Module:
         re.finditer(r"\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)(.*?)\bendmodule\b", src, re.DOTALL)
     )
     if not mods:
-        raise ValueError("no module found")
+        raise NoModuleFound()
     chosen = mods[0]
     if module_name:
         for m in mods:
@@ -361,7 +383,7 @@ def parse(src: str, module_name: str | None = None) -> Module:
                 chosen = m
                 break
         else:
-            raise ValueError(f"module {module_name!r} not found")
+            raise ModuleNotFound(module_name, [m.group(1) for m in mods])
 
     body = chosen.group(2)
     mod = Module(name=chosen.group(1))

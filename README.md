@@ -50,6 +50,12 @@ ctbench check cmp_leaky.v
 # Check a design of your own
 ctbench check my_core.v --observation done --secret key --secret nonce
 
+# Check a whole directory at once
+ctbench check rtl/*.v --secret key --secret nonce
+
+# Emit SARIF 2.1.0 so findings land in GitHub code scanning
+ctbench check rtl/*.v --secret key --sarif > ctbench.sarif
+
 # Where do the bundled fixtures live?
 ctbench fixtures
 ```
@@ -223,6 +229,28 @@ integrator, an auditor, a customer — to believe a constant-time result *withou
 your netlist*, that is a different problem: it needs a proof that binds to a commitment of
 a design that is never disclosed. That capability is commercial and is not part of this
 package. Everything here operates on designs you already control.
+
+## Three verdicts, three exit codes
+
+| Exit | Verdict | Meaning |
+|---|---|---|
+| `0` | `CONSTANT_TIME` | no declared secret reaches the observation signal |
+| `1` | `LEAKY` | one does, and the reaching signals are named |
+| `2` | `UNKNOWN` | the analysis could not read the design. **No verdict.** |
+
+Exit 2 deliberately outranks exit 1 when several files are checked: a job guarding
+only against `1` must not be satisfied by "we could not tell". `UNKNOWN` is not a
+pass — see [SCOPE.md](SCOPE.md) for the constructs that produce it and why refusing
+is the sound behaviour.
+
+## Documentation
+
+| | |
+|---|---|
+| [TUTORIAL.md](TUTORIAL.md) | end to end: find a leak, fix it, put the check in CI |
+| [SCOPE.md](SCOPE.md) | what a verdict proves — and the constructs it refuses, and why |
+| [CLI.md](CLI.md) | every command, flag, exit code, and the Python API |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | every error message, what it means, what to do |
 
 <!-- portfolio:start -->
 ## Part of the hw-verify toolkit

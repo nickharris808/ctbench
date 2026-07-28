@@ -17,6 +17,7 @@ from .leaderboard import (
     make_submission,
     parse_submission,
 )
+from .sarif import to_sarif
 from .score import format_report, load_manifest, score
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -83,10 +84,9 @@ def resolve(target: str, manifest: dict) -> tuple[Path, dict | None]:
     )
 
 
-def _cmd_check(args) -> int:
-    man = load_manifest(args.manifest)
-    path, entry = resolve(args.file, man)
-
+def _check_one(target: str, man: dict, args) -> dict:
+    """Resolve one target and check it, returning the verdict dict plus its path."""
+    path, entry = resolve(target, man)
     observation = args.observation
     secrets = list(args.secret)
     module = args.module
@@ -99,18 +99,48 @@ def _cmd_check(args) -> int:
     observation = observation or "done"
     if not secrets:
         raise SystemExit(
-            "ctbench: no secrets given. Pass --secret NAME (repeatable), or name a "
-            "bundled fixture whose secrets the manifest already records."
+            f"ctbench: no secrets given for {path.name}. Secrets are a specification\n"
+            f"         choice and are never inferred — guessing which inputs are\n"
+            f"         sensitive would produce confident verdicts about the wrong\n"
+            f"         property.\n"
+            f"         Pass --secret NAME (repeatable), or name a bundled fixture\n"
+            f"         whose secrets the manifest already records (ctbench fixtures)."
         )
+    d = check(path.read_text(), observation, secrets, module).to_dict()
+    # Relative to the working directory when it is under it. SARIF consumers resolve
+    # artifact URIs against the repository root, so an absolute path from the build
+    # machine points at nothing on GitHub — and it leaks the builder's directory
+    # layout into a file that gets uploaded.
+    try:
+        d["file"] = str(path.resolve().relative_to(Path.cwd()))
+    except ValueError:
+        d["file"] = path.name if path.is_absolute() else str(path)
+    return d
 
-    v = check(path.read_text(), observation, secrets, module)
-    print(json.dumps(v.to_dict(), indent=2))
-    if v.status == UNKNOWN:
-        # Exit 2, distinct from both 0 (constant-time) and 1 (leaky): a caller that
-        # gates on `if ctbench check ...` must not read "could not analyse" as a pass.
-        print(f"\nUNKNOWN — no verdict was reached.\n{v.reason}", file=sys.stderr)
+
+def _cmd_check(args) -> int:
+    man = load_manifest(args.manifest)
+    results = [_check_one(t, man, args) for t in args.file]
+
+    if args.sarif:
+        print(json.dumps(to_sarif(results), indent=2))
+    elif args.json or len(results) == 1:
+        print(json.dumps(results[0] if len(results) == 1 else results, indent=2))
+    else:
+        for d in results:
+            mark = {"CONSTANT_TIME": "ok     ", "LEAKY": "LEAKY  ", "UNKNOWN": "UNKNOWN"}[d["verdict"]]
+            extra = ", ".join(d["reaching_secrets"]) or ("no verdict" if d["verdict"] == UNKNOWN else "—")
+            print(f"  [{mark}] {d['file']:<40} {extra}")
+
+    for d in results:
+        if d["verdict"] == UNKNOWN and not (args.json or args.sarif):
+            print(f"\nUNKNOWN — no verdict for {d['file']}.\n{d.get('reason', '')}", file=sys.stderr)
+
+    # Worst verdict wins, and UNKNOWN outranks LEAKY because "we could not tell"
+    # must not be satisfiable by a caller that only guards against exit 1.
+    if any(d["verdict"] == UNKNOWN for d in results):
         return 2
-    return 0 if v.constant_time else 1
+    return 0 if all(d["verdict"] == "CONSTANT_TIME" for d in results) else 1
 
 
 def _cmd_fixtures(args) -> int:
@@ -198,12 +228,17 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(func=_cmd_score)
 
     c = sub.add_parser(
-        "check", help="check one Verilog file, or a bundled fixture by name")
-    c.add_argument("file", help="path to a .v file, or the name of a bundled fixture")
+        "check", help="check Verilog files, or bundled fixtures by name")
+    c.add_argument("file", nargs="+",
+                   help="one or more .v paths, or names of bundled fixtures")
     c.add_argument("--observation", help="completion signal (default: from manifest, else 'done')")
     c.add_argument("--secret", action="append", default=[],
                    help="a secret input; repeatable. Defaults to the manifest for a bundled fixture")
     c.add_argument("--module")
+    c.add_argument("--json", action="store_true",
+                   help="emit the verdict(s) as JSON")
+    c.add_argument("--sarif", action="store_true",
+                   help="emit SARIF 2.1.0 for GitHub code scanning")
     c.set_defaults(func=_cmd_check)
 
     f = sub.add_parser("fixtures", help="list the bundled fixtures and where they live")
