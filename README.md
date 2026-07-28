@@ -111,6 +111,25 @@ The scoring is deliberately asymmetric, because the two error directions are not
 Abstention is not punished as hard as being wrong. A tool that admits it cannot decide is
 more useful than one that guesses.
 
+## What it reads, and what it refuses
+
+The analysis reads **one flat module** of `assign` statements, net declarations carrying
+an initialiser, and `always` blocks. That is the whole supported subset.
+
+Anything else — a **submodule instantiation**, a `for` loop, `generate`, a `function` or
+`task` definition, a preprocessor macro — is *not* partially analysed. Each of those
+creates dependency edges the cone cannot follow, and a missing edge does not make the
+answer vaguer: it empties the cone, and an empty cone contains no secrets, and no secrets
+reads as safe. Analysing the readable remainder of such a design would report
+`CONSTANT_TIME` for a design that genuinely leaks.
+
+So the checker refuses. Out-of-subset constructs return **`UNKNOWN`**, naming the
+construct and the line, and an observation that nothing in the parsed source drives
+returns `UNKNOWN` rather than a vacuous pass.
+
+**`UNKNOWN` is not a pass.** It is the absence of a verdict, it exits non-zero, and
+`constant_time` is `False` for it.
+
 ## The leaderboard
 
 A corpus is only a benchmark if others can submit to it and be ranked by a rule they did
@@ -182,8 +201,9 @@ it takes the fan-in cone of the observation signal — including every enclosing
 guard condition, which is the part naive implementations miss — and intersects it with the
 declared secret inputs.
 
-It is an over-approximation, so `CONSTANT_TIME` is conservative and `LEAKY` names the
-reaching signals. It scores 18/18 on this corpus. **This is a baseline, not a strong
+Within the supported subset below it is an over-approximation, so `CONSTANT_TIME` is
+conservative there and `LEAKY` names the reaching signals; outside that subset it returns
+`UNKNOWN` rather than a verdict. It scores 18/18 on this corpus. **This is a baseline, not a strong
 tool**: it reasons about syntax, not semantics, and will over-report on designs where a
 secret reaches a completion signal through a path that is provably never taken.
 

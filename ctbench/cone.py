@@ -7,9 +7,20 @@ A design is constant-time with respect to an observation signal when the value o
 that signal at every cycle is a function of non-secret state alone.  A sound and
 cheap over-approximation is the syntactic fan-in cone: if no secret input reaches
 the observation signal through any assignment or through any condition guarding an
-assignment, the signal cannot depend on a secret.  The cone over-approximates, so a
-CONSTANT_TIME verdict is conservative; a LEAKY verdict names the reaching signals so
-a human can confirm it.
+assignment, the signal cannot depend on a secret.  The cone over-approximates
+*within the supported subset*, so a CONSTANT_TIME verdict is conservative there; a
+LEAKY verdict names the reaching signals so a human can confirm it.
+
+That qualifier is load-bearing, and getting it wrong is the one bug this analysis
+cannot survive.  The cone is built by reading `assign` statements, net declarations
+carrying an initialiser, and `always` blocks.  A dependency edge created by anything
+else -- a submodule instantiation, a `for` loop, a `function`, a macro -- is simply
+invisible to it.  An invisible edge does not produce a cautious answer; it produces an
+*empty cone*, and an empty cone reads as CONSTANT_TIME.  A checker that reports "safe"
+about a design it could not read is worse than no checker, so `parse` refuses outright:
+every construct outside the subset raises `UnsupportedConstruct`, and an observation
+whose cone is empty raises `UndrivenObservation`.  Refusing is the sound behaviour; a
+verdict is only ever returned for a design that was actually read.
 
 Guard conditions are the part naive implementations miss.  In
 
@@ -31,6 +42,92 @@ _KEYWORDS = frozenset(["module", "endmodule", "input", "output", "inout", "wire"
 _IDENT = re.compile(r"\b([A-Za-z_][A-Za-z0-9_$]*)\b")
 _SIZED_LITERAL = re.compile(r"\b\d+\s*'\s*[bBoOdDhH][0-9a-fA-FxXzZ_]+")
 _BASED_LITERAL = re.compile(r"'\s*[bBoOdDhH][0-9a-fA-FxXzZ_]+")
+
+
+class AnalysisRefused(ValueError):
+    """Base for every condition under which no verdict may be returned."""
+
+
+class UnsupportedConstruct(AnalysisRefused):
+    """The source uses a construct the cone analysis cannot read.
+
+    Raised rather than analysing the readable remainder: a construct this parser
+    skips is a dependency edge that silently vanishes, and a missing edge makes a
+    leaky design look constant-time.
+    """
+
+    def __init__(self, construct: str, line: int, snippet: str) -> None:
+        self.construct, self.line, self.snippet = construct, line, snippet
+        super().__init__(
+            f"line {line}: {construct} is outside the supported Verilog subset "
+            f"({snippet!r}). Dependencies created by it would be invisible to the "
+            f"cone analysis, so no verdict is returned. "
+            f"Flatten the design to a single module of assign/always statements, or "
+            f"analyse the submodule directly with --module."
+        )
+
+
+class UnknownObservation(AnalysisRefused):
+    """The named observation is not a signal of this module at all."""
+
+    def __init__(self, observation: str, module: str, outputs: list[str]) -> None:
+        self.observation, self.module = observation, module
+        super().__init__(
+            f"observation {observation!r} is not declared or driven in {module!r}. "
+            f"Declared outputs: {', '.join(outputs) or '(none)'}. "
+            f"Pass --observation with one of those, or --module to select a different module."
+        )
+
+
+class UndrivenObservation(AnalysisRefused):
+    """The observation exists but nothing in the parsed subset drives it."""
+
+    def __init__(self, observation: str, module: str) -> None:
+        self.observation, self.module = observation, module
+        super().__init__(
+            f"observation {observation!r} is declared in {module!r} but nothing in the "
+            f"parsed source drives it, so its fan-in cone is empty. An empty cone would "
+            f"report CONSTANT_TIME without having checked anything, so no verdict is "
+            f"returned. Check the signal name, or supply the source that drives it."
+        )
+
+
+# Constructs that create dependency edges this parser cannot follow.  Each is a
+# refusal, not a warning: see the module docstring for why partial analysis of a
+# design containing one is unsound rather than merely incomplete.
+_UNSUPPORTED: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # `sub u1 (.a(x))` -- the submodule body, and every edge through it, is unread.
+    ("module instantiation", re.compile(r"(?m)^[ \t]*([A-Za-z_]\w*)[ \t]+(?:#\s*\([^)]*\)[ \t]*)?([A-Za-z_]\w*)[ \t]*\(")),
+    ("for loop", re.compile(r"\bfor\b\s*\(")),
+    ("generate block", re.compile(r"\bgenerate\b")),
+    ("function definition", re.compile(r"\bfunction\b")),
+    ("task definition", re.compile(r"\btask\b")),
+    ("while loop", re.compile(r"\bwhile\b")),
+    ("repeat loop", re.compile(r"\brepeat\b")),
+    ("forever loop", re.compile(r"\bforever\b")),
+    # A macro can hide an entire guard expression behind one token.
+    ("preprocessor directive", re.compile(r"`(?!timescale\b)[A-Za-z_]\w*")),
+)
+
+
+def unsupported_constructs(src: str) -> list[tuple[str, int, str]]:
+    """Every out-of-subset construct in `src`, as (construct, line, snippet).
+
+    Runs on comment-stripped source: prose in a comment mentioning a `for` loop, or
+    a Markdown backtick, must not be mistaken for the construct itself.
+    """
+    stripped = strip_comments(src)
+    found: list[tuple[str, int, str]] = []
+    for name, pat in _UNSUPPORTED:
+        for m in pat.finditer(stripped):
+            # `always @(...)`, `if (...)` and friends have the IDENT IDENT '(' shape too.
+            if name == "module instantiation" and (
+                m.group(1) in _KEYWORDS or m.group(2) in _KEYWORDS
+            ):
+                continue
+            line = stripped[: m.start()].count("\n") + 1
+            found.append((name, line, m.group(0).strip()))
+    return sorted(found, key=lambda f: f[1])
 
 
 def strip_comments(src: str) -> str:
@@ -244,7 +341,13 @@ def _case_body(s: str, start: int) -> tuple[str, int]:
 
 
 def parse(src: str, module_name: str | None = None) -> Module:
-    """Parse one module of a synthesisable Verilog subset into a dependency graph."""
+    """Parse one module of a synthesisable Verilog subset into a dependency graph.
+
+    Raises `UnsupportedConstruct` on the first construct outside the subset rather
+    than analysing what remains.
+    """
+    for construct, line, snippet in unsupported_constructs(src):
+        raise UnsupportedConstruct(construct, line, snippet)
     src = strip_comments(src)
     mods = list(
         re.finditer(r"\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)(.*?)\bendmodule\b", src, re.DOTALL)
@@ -289,32 +392,63 @@ def parse(src: str, module_name: str | None = None) -> Module:
     return mod
 
 
+CONSTANT_TIME = "CONSTANT_TIME"
+LEAKY = "LEAKY"
+UNKNOWN = "UNKNOWN"
+
+
 @dataclass
 class Verdict:
     module: str
     observation: str
     secrets: list[str]
     reaching: list[str]
-    constant_time: bool
     cone_size: int
+    status: str = CONSTANT_TIME
+    # Populated only for UNKNOWN: why no verdict could be reached.
+    reason: str | None = None
+
+    @property
+    def constant_time(self) -> bool:
+        """True only for a positively established CONSTANT_TIME verdict.
+
+        UNKNOWN is not constant-time.  Callers that treat a falsy result as "leaky"
+        stay safe; callers that treat a truthy result as "safe" stay correct.
+        """
+        return self.status == CONSTANT_TIME
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "module": self.module,
             "observation": self.observation,
             "secrets": self.secrets,
             "reaching_secrets": self.reaching,
-            "verdict": "CONSTANT_TIME" if self.constant_time else "LEAKY",
+            "verdict": self.status,
             "cone_size": self.cone_size,
         }
+        if self.reason is not None:
+            d["reason"] = self.reason
+        return d
 
 
 def analyse(src: str, observation: str, secrets: list[str],
             module_name: str | None = None) -> Verdict:
-    """Decide constant-timeness of `observation` with respect to `secrets`."""
+    """Decide constant-timeness of `observation` with respect to `secrets`.
+
+    Raises rather than guessing: `UnsupportedConstruct` if the source is outside the
+    readable subset, `UndrivenObservation` if nothing drives the observation.  Use
+    `check` for a non-raising call that reports those as UNKNOWN.
+    """
     mod = parse(src, module_name)
     if observation not in mod.deps and observation not in mod.outputs:
-        raise ValueError(f"observation {observation!r} is not driven in {mod.name}")
+        raise UnknownObservation(observation, mod.name, mod.outputs)
+    # Declared as an output but never assigned anywhere the parser looked: no driver
+    # was read, so the cone is empty and CONSTANT_TIME would assert safety about a
+    # signal nothing was checked against.  Note this is *presence* in `deps`, not a
+    # non-empty cone: `assign done = 1'b1;` records an assignment with no sources,
+    # which is a genuine, fully-analysed constant-time driver.
+    if observation not in mod.deps:
+        raise UndrivenObservation(observation, mod.name)
     cone = mod.cone([observation])
     reaching = sorted(cone & set(secrets))
     return Verdict(
@@ -322,6 +456,28 @@ def analyse(src: str, observation: str, secrets: list[str],
         observation=observation,
         secrets=sorted(secrets),
         reaching=reaching,
-        constant_time=not reaching,
         cone_size=len(cone),
+        status=LEAKY if reaching else CONSTANT_TIME,
     )
+
+
+def check(src: str, observation: str, secrets: list[str],
+          module_name: str | None = None) -> Verdict:
+    """`analyse`, but a refusal becomes an UNKNOWN verdict instead of an exception.
+
+    For callers that must report on every input -- a CLI over many files, CI, an
+    agent -- where one unreadable file should not abort the run.  UNKNOWN is never
+    silent: it carries the reason, and it is not constant-time.
+    """
+    try:
+        return analyse(src, observation, secrets, module_name)
+    except AnalysisRefused as e:
+        return Verdict(
+            module=module_name or "?",
+            observation=observation,
+            secrets=sorted(secrets),
+            reaching=[],
+            cone_size=0,
+            status=UNKNOWN,
+            reason=str(e),
+        )

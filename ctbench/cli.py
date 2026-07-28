@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from .cone import analyse
+from .cone import UNKNOWN, check
 from .export import export as export_dataset
 from .leaderboard import (
     InvalidSubmission,
@@ -27,8 +27,8 @@ def run_reference(manifest: dict, fixtures: Path = FIXTURES) -> dict[str, str]:
     out: dict[str, str] = {}
     for entry in manifest["scored"]:
         src = (fixtures / entry["file"]).read_text()
-        v = analyse(src, entry["observation"], entry["secrets"], entry["module"])
-        out[entry["file"]] = "CONSTANT_TIME" if v.constant_time else "LEAKY"
+        v = check(src, entry["observation"], entry["secrets"], entry["module"])
+        out[entry["file"]] = v.status
     return out
 
 
@@ -103,8 +103,13 @@ def _cmd_check(args) -> int:
             "bundled fixture whose secrets the manifest already records."
         )
 
-    v = analyse(path.read_text(), observation, secrets, module)
+    v = check(path.read_text(), observation, secrets, module)
     print(json.dumps(v.to_dict(), indent=2))
+    if v.status == UNKNOWN:
+        # Exit 2, distinct from both 0 (constant-time) and 1 (leaky): a caller that
+        # gates on `if ctbench check ...` must not read "could not analyse" as a pass.
+        print(f"\nUNKNOWN — no verdict was reached.\n{v.reason}", file=sys.stderr)
+        return 2
     return 0 if v.constant_time else 1
 
 
