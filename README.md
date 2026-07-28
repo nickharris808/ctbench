@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/harness-Apache--2.0-blue.svg)](LICENSE)
 [![Fixtures](https://img.shields.io/badge/fixtures-CC--BY--4.0-lightgrey.svg)](LICENSE-FIXTURES)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
-[![CI](https://img.shields.io/badge/CI-test%20matrix-brightgreen.svg)](.github/workflows/ci.yml)
+[![CI](https://github.com/nickharris808/ctbench/actions/workflows/ci.yml/badge.svg)](https://github.com/nickharris808/ctbench/actions/workflows/ci.yml)
 
 > **▶ [Try it in your browser](https://huggingface.co/spaces/nickh007/hw-verify)** — paste Verilog, get a formal constant-time verdict with the leaking signals named. No install, nothing uploaded.
 
