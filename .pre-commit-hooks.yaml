@@ -1,0 +1,26 @@
+# Consumed by https://pre-commit.com — a user adds three lines to their
+# .pre-commit-config.yaml and the check runs on every commit, on the files that
+# changed rather than the whole tree.
+#
+# `require_serial` is set because the hooks below share a baseline file; two
+# processes rewriting it concurrently under --update-baseline would interleave.
+- id: ctbench
+  name: ctbench (constant-time RTL)
+  description: >-
+    Fail the commit when a completion signal in changed Verilog depends on a declared
+    secret. Secrets are never inferred, so `args: [--secret, key]` is required.
+  entry: ctbench check
+  language: python
+  files: \.v$
+  require_serial: true
+
+- id: ctbench-netlist
+  name: ctbench (synthesised netlist)
+  description: >-
+    Check a Yosys JSON netlist instead of Verilog source, which is how hierarchical
+    designs get a verdict rather than UNKNOWN.
+  entry: ctbench check --netlist
+  language: python
+  files: \.json$
+  require_serial: true
+  pass_filenames: false

@@ -193,3 +193,40 @@ def test_sibling_tools_are_cross_linked(docs):
     for repo in ("ct-mask", "patchproof", "ct-audit-action", "hw-verify-mcp"):
         assert f"github.com/nickharris808/{repo}" in joined, f"no cross-link to {repo}"
     assert "huggingface.co/spaces/nickh007/hw-verify" in joined
+
+
+# ---------------------------------------------------------------------------
+# The pre-commit hook definitions must describe commands that exist.
+# ---------------------------------------------------------------------------
+
+def test_precommit_hooks_are_valid_and_runnable():
+    """A hook whose entry does not exist fails on a stranger's first commit."""
+    import yaml
+
+    p = ROOT / ".pre-commit-hooks.yaml"
+    assert p.is_file(), "the README documents a pre-commit hook; the manifest must ship"
+    hooks = yaml.safe_load(p.read_text())
+    assert hooks, "no hooks declared"
+    for h in hooks:
+        for key in ("id", "name", "entry", "language", "description"):
+            assert h.get(key), f"hook {h.get('id')!r} is missing {key}"
+        # `entry` is "ctbench <subcommand> [flags]"; the subcommand must be real.
+        parts = h["entry"].split()
+        assert parts[0] == "ctbench", h["entry"]
+        assert _run(parts[1], "--help").returncode == 0, (
+            f"hook {h['id']!r} runs {h['entry']!r} but that subcommand does not exist"
+        )
+
+
+def test_the_readme_precommit_example_names_a_declared_hook():
+    import re
+
+    import yaml
+
+    readme = (ROOT / "README.md").read_text()
+    if "pre-commit" not in readme:
+        pytest.skip("no pre-commit section")
+    declared = {h["id"] for h in yaml.safe_load((ROOT / ".pre-commit-hooks.yaml").read_text())}
+    used = set(re.findall(r"- id: ([\w-]+)", readme))
+    assert used, "the README shows no hook id"
+    assert used <= declared, f"README references undeclared hook(s): {used - declared}"

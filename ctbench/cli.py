@@ -8,7 +8,10 @@ import sys
 from pathlib import Path
 
 from .baseline import Baseline, BaselineError
-from .cone import UNKNOWN, check, check_netlist
+from .cone import UNKNOWN, AnalysisRefused, check, check_netlist, parse, verdict_for
+from .diff import diff as diff_findings
+from .diff import load_findings
+from .explain import explain as build_explanation
 from .export import export as export_dataset
 from .findings import Findings
 from .leaderboard import (
@@ -184,6 +187,75 @@ def _cmd_check(args) -> int:
     return findings.exit_code()
 
 
+
+def _cmd_explain(args) -> int:
+    """Show how each secret reaches the observation, not just that it does."""
+    man = load_manifest(args.manifest)
+    if args.netlist:
+        from .netlist import load_netlist
+        mod = load_netlist(args.netlist, args.top or args.module)
+        observation = args.observation or "done"
+        secrets = list(args.secret)
+        if not secrets:
+            raise SystemExit(_NO_SECRETS.format(what=Path(args.netlist).name))
+        display = _display_path(Path(args.netlist))
+    else:
+        path, entry = resolve(args.file, man)
+        observation = args.observation
+        secrets = list(args.secret)
+        module = args.module
+        if entry:
+            observation = observation or entry.get("observation")
+            secrets = secrets or list(entry.get("secrets", []))
+            module = module or entry.get("module")
+        observation = observation or "done"
+        if not secrets:
+            raise SystemExit(_NO_SECRETS.format(what=path.name))
+        display = _display_path(path)
+        try:
+            mod = parse(path.read_text(), module)
+        except AnalysisRefused as exc:
+            # Same discipline as `check`: a design we cannot read gets no explanation
+            # and no verdict, rather than an explanation of a graph we never built.
+            print(f"UNKNOWN — no verdict for {display}.\n\n{exc}", file=sys.stderr)
+            return 2
+
+    try:
+        v = verdict_for(mod, observation, secrets)
+    except AnalysisRefused as exc:
+        print(f"UNKNOWN — no verdict for {display}.\n\n{exc}", file=sys.stderr)
+        return 2
+
+    e = build_explanation(mod, v, limit_per_secret=args.paths)
+    if args.json:
+        print(json.dumps(e.to_dict(), indent=2))
+    elif args.dot:
+        print(e.to_dot())
+    elif args.mermaid:
+        print(e.to_mermaid())
+    else:
+        print(e.render())
+    return 0 if v.constant_time else 1
+
+
+def _cmd_diff(args) -> int:
+    """Compare two result files and report only what changed."""
+    try:
+        before = load_findings(args.before)
+        after = load_findings(args.after)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"ctbench: cannot read results: {exc}", file=sys.stderr)
+        return 2
+    d = diff_findings(before, after)
+    if args.json:
+        print(json.dumps(d.to_dict(), indent=2))
+    elif args.markdown:
+        print(d.to_markdown())
+    else:
+        print(d.render())
+    return d.exit_code()
+
+
 def _cmd_fixtures(args) -> int:
     man = load_manifest(args.manifest)
     print(f"bundled fixtures ({FIXTURES}):\n")
@@ -289,6 +361,30 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--update-baseline", action="store_true",
                    help="write the current findings to the baseline file and exit 0")
     c.set_defaults(func=_cmd_check)
+
+    xp = sub.add_parser(
+        "explain", help="show HOW each secret reaches the observation")
+    xp.add_argument("file", nargs="?", help="a .v file, or a bundled fixture name")
+    xp.add_argument("--observation")
+    xp.add_argument("--secret", action="append", default=[])
+    xp.add_argument("--module")
+    xp.add_argument("--netlist", metavar="JSON", help="explain a Yosys netlist instead")
+    xp.add_argument("--top")
+    xp.add_argument("--paths", type=int, default=1, metavar="N",
+                    help="paths to show per secret (default 1, the shortest)")
+    xp.add_argument("--json", action="store_true")
+    xp.add_argument("--dot", action="store_true", help="emit Graphviz DOT")
+    xp.add_argument("--mermaid", action="store_true", help="emit a Mermaid flowchart")
+    xp.set_defaults(func=_cmd_explain)
+
+    df = sub.add_parser(
+        "diff", help="compare two `check --json` results and report what changed")
+    df.add_argument("before")
+    df.add_argument("after")
+    df.add_argument("--json", action="store_true")
+    df.add_argument("--markdown", action="store_true",
+                    help="emit a pull-request comment")
+    df.set_defaults(func=_cmd_diff)
 
     f = sub.add_parser("fixtures", help="list the bundled fixtures and where they live")
     f.set_defaults(func=_cmd_fixtures)

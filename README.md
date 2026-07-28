@@ -338,3 +338,22 @@ for full attribution.
 ## Contributing
 
 New matched pairs are the most valuable contribution. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Pre-commit hook
+
+The tightest feedback loop: run on the files that changed, at commit time, before CI
+ever sees them.
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/nickharris808/ctbench
+    rev: main            # or pin a tag
+    hooks:
+      - id: ctbench
+        args: [--secret, key, --secret, nonce]
+```
+
+Secrets are still never inferred, so `args` is required — a hook that guessed which
+inputs were sensitive would give confident verdicts about the wrong property on every
+commit.
