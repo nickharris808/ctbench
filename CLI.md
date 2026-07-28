@@ -19,6 +19,10 @@ Check one or more Verilog files. Accepts paths, or bare names of bundled fixture
 | `--module NAME` | which module in a multi-module file. Default: the first |
 | `--json` | emit JSON — an object for one file, a list for several |
 | `--sarif` | emit SARIF 2.1.0 for GitHub code scanning |
+| `--netlist JSON` | analyse a Yosys JSON netlist instead of Verilog source |
+| `--top NAME` | top module in the netlist (default: whichever Yosys marked) |
+| `--baseline FILE` | accept the findings in FILE; fail only on new ones |
+| `--update-baseline` | write current findings to the baseline and exit 0 |
 
 Exit: `0` all constant-time · `1` at least one leaky · `2` at least one UNKNOWN.
 Exit 2 outranks exit 1, so a job guarding only against `1` cannot be satisfied by
@@ -26,6 +30,7 @@ Exit 2 outranks exit 1, so a job guarding only against `1` cannot be satisfied b
 
 ```bash
 ctbench check cmp_leaky.v                                  # bundled fixture
+ctbench check --netlist build/aes.json --secret key        # hierarchical design
 ctbench check rtl/*.v --secret key --secret nonce          # your RTL, many files
 ctbench check rtl/*.v --secret key --sarif > out.sarif     # for code scanning
 ```
@@ -68,7 +73,8 @@ Emit the corpus as JSONL plus a dataset card, loadable by `datasets`.
 ## Python API
 
 ```python
-from ctbench.cone import check, analyse, UNKNOWN, CONSTANT_TIME, LEAKY
+from ctbench import check, analyse, UNKNOWN, CONSTANT_TIME, LEAKY
+from ctbench import check_netlist, load_netlist, Findings
 
 v = check(source, "done", ["key", "nonce"], module_name=None)
 v.status          # "CONSTANT_TIME" | "LEAKY" | "UNKNOWN"
@@ -98,6 +104,13 @@ report a refusal:
 from ctbench.cone import unsupported_constructs, parse
 unsupported_constructs(src)   # [(construct, line, snippet), ...] — empty if analysable
 parse(src, module_name)       # -> Module with .inputs, .outputs, .deps, .cone(roots)
+
+from ctbench import Findings          # a result set, and every output format
+f = Findings(); f.add(verdict, "rtl/a.v")
+f.to_json(); f.to_sarif(); f.to_table(); f.exit_code()   # UNKNOWN outranks LEAKY
+
+from ctbench import check_netlist     # the Yosys frontend, same Verdict type
+from ctbench.baseline import Baseline # accept known findings
 
 from ctbench.score import score, load_manifest, format_report
 from ctbench.sarif import to_sarif          # verdict dicts -> SARIF 2.1.0 log

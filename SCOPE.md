@@ -91,6 +91,31 @@ Two other refusals in the same spirit:
 
 ---
 
+## The netlist frontend
+
+`--netlist` reads a Yosys JSON netlist rather than Verilog source, which is how
+hierarchical designs get a verdict at all. The claim it supports is the same one —
+no declared secret in the observation's fan-in — over the *elaborated* design.
+
+What changes:
+
+- **The subset limits disappear**, because `generate`, `for`, `function` and macros
+  have been elaborated away before the JSON is written.
+- **A new refusal appears**: an unmodelled cell type. Skipping a cell would delete
+  every dependency edge across it, so an unrecognised type returns `UNKNOWN` naming
+  the cell. Blackboxes and technology cells that survived flattening are called out
+  specifically.
+- **Within a cell, the analysis is more approximate**: every input bit is treated as
+  reaching every output bit. A real `$mux` output depends on the select and one data
+  input, not both. That is the sound direction — extra edges can only make a design
+  look leakier — and it is why netlist cone sizes are much larger than source ones.
+
+What does **not** change: this says nothing about whether the netlist corresponds to
+the RTL you think it does. A netlist for a different design is analysed faithfully
+and reported faithfully, and nothing here can detect the mismatch.
+
+---
+
 ## Where it is imprecise, and in which direction
 
 Within the supported subset the analysis is a **syntactic over-approximation**. It

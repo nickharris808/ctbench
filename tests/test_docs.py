@@ -166,7 +166,7 @@ def test_scope_lists_exactly_the_constructs_the_scanner_refuses(docs):
     from ctbench.cone import _UNSUPPORTED
 
     scope = docs["SCOPE.md"].lower()
-    for name, _ in _UNSUPPORTED:
+    for name, _pat, _literal in _UNSUPPORTED:
         head = name.split()[0].lower()          # "module", "for", "generate", ...
         assert head in scope, f"SCOPE.md never mentions the refused construct {name!r}"
 

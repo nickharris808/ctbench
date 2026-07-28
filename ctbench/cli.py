@@ -7,8 +7,10 @@ import json
 import sys
 from pathlib import Path
 
-from .cone import UNKNOWN, check
+from .baseline import Baseline, BaselineError
+from .cone import UNKNOWN, check, check_netlist
 from .export import export as export_dataset
+from .findings import Findings
 from .leaderboard import (
     InvalidSubmission,
     build_leaderboard,
@@ -17,7 +19,6 @@ from .leaderboard import (
     make_submission,
     parse_submission,
 )
-from .sarif import to_sarif
 from .score import format_report, load_manifest, score
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -84,8 +85,31 @@ def resolve(target: str, manifest: dict) -> tuple[Path, dict | None]:
     )
 
 
-def _check_one(target: str, man: dict, args) -> dict:
-    """Resolve one target and check it, returning the verdict dict plus its path."""
+_NO_SECRETS = (
+    "ctbench: no secrets given for {what}. Secrets are a specification\n"
+    "         choice and are never inferred — guessing which inputs are\n"
+    "         sensitive would produce confident verdicts about the wrong\n"
+    "         property.\n"
+    "         Pass --secret NAME (repeatable), or name a bundled fixture\n"
+    "         whose secrets the manifest already records (ctbench fixtures)."
+)
+
+
+def _display_path(path: Path) -> str:
+    """Relative to cwd when possible.
+
+    SARIF consumers resolve artifact URIs against the repository root, so an
+    absolute path from the build machine points at nothing on GitHub — and it leaks
+    the builder's directory layout into a file that gets uploaded.
+    """
+    try:
+        return str(path.resolve().relative_to(Path.cwd()))
+    except ValueError:
+        return path.name if path.is_absolute() else str(path)
+
+
+def _check_one(target: str, man: dict, args):
+    """Resolve one target and check it, returning (display path, Verdict)."""
     path, entry = resolve(target, man)
     observation = args.observation
     secrets = list(args.secret)
@@ -98,49 +122,66 @@ def _check_one(target: str, man: dict, args) -> dict:
         module = module or entry.get("module")
     observation = observation or "done"
     if not secrets:
-        raise SystemExit(
-            f"ctbench: no secrets given for {path.name}. Secrets are a specification\n"
-            f"         choice and are never inferred — guessing which inputs are\n"
-            f"         sensitive would produce confident verdicts about the wrong\n"
-            f"         property.\n"
-            f"         Pass --secret NAME (repeatable), or name a bundled fixture\n"
-            f"         whose secrets the manifest already records (ctbench fixtures)."
-        )
-    d = check(path.read_text(), observation, secrets, module).to_dict()
-    # Relative to the working directory when it is under it. SARIF consumers resolve
-    # artifact URIs against the repository root, so an absolute path from the build
-    # machine points at nothing on GitHub — and it leaks the builder's directory
-    # layout into a file that gets uploaded.
-    try:
-        d["file"] = str(path.resolve().relative_to(Path.cwd()))
-    except ValueError:
-        d["file"] = path.name if path.is_absolute() else str(path)
-    return d
+        raise SystemExit(_NO_SECRETS.format(what=path.name))
+    return _display_path(path), check(path.read_text(), observation, secrets, module)
 
 
 def _cmd_check(args) -> int:
     man = load_manifest(args.manifest)
-    results = [_check_one(t, man, args) for t in args.file]
+
+    findings = Findings()
+    if args.netlist:
+        # One netlist describes one elaborated design, so `--netlist` takes a single
+        # path and the positional file list is not used.
+        observation = args.observation or "done"
+        secrets = list(args.secret)
+        if not secrets:
+            raise SystemExit(_NO_SECRETS.format(what=Path(args.netlist).name))
+        v = check_netlist(args.netlist, observation, secrets, args.top or args.module)
+        findings.add(v, _display_path(Path(args.netlist)))
+    else:
+        for target in args.file:
+            path, verdict = _check_one(target, man, args)
+            findings.add(verdict, path)
+
+    baseline = None
+    if args.baseline and not args.update_baseline:
+        try:
+            baseline = Baseline.load(args.baseline)
+        except BaselineError as exc:
+            print(f"ctbench: {exc}", file=sys.stderr)
+            return 2
+        baseline.apply(findings)
+
+    if args.update_baseline:
+        target = args.baseline or "ctbench-baseline.json"
+        Baseline.from_findings(findings).save(target)
+        print(f"wrote {target}: {len(Baseline.from_findings(findings))} accepted finding(s)")
+        return 0
 
     if args.sarif:
-        print(json.dumps(to_sarif(results), indent=2))
-    elif args.json or len(results) == 1:
-        print(json.dumps(results[0] if len(results) == 1 else results, indent=2))
+        print(json.dumps(findings.to_sarif(), indent=2))
+    elif args.json or len(findings) == 1:
+        print(findings.to_json())
     else:
-        for d in results:
-            mark = {"CONSTANT_TIME": "ok     ", "LEAKY": "LEAKY  ", "UNKNOWN": "UNKNOWN"}[d["verdict"]]
-            extra = ", ".join(d["reaching_secrets"]) or ("no verdict" if d["verdict"] == UNKNOWN else "—")
-            print(f"  [{mark}] {d['file']:<40} {extra}")
+        print(findings.to_table())
 
-    for d in results:
-        if d["verdict"] == UNKNOWN and not (args.json or args.sarif):
-            print(f"\nUNKNOWN — no verdict for {d['file']}.\n{d.get('reason', '')}", file=sys.stderr)
+    if not (args.json or args.sarif):
+        for f in findings:
+            if f.status == UNKNOWN and not f.baselined:
+                print(f"\nUNKNOWN — no verdict for {f.file}.\n{f.verdict.reason}",
+                      file=sys.stderr)
+        if baseline is not None:
+            stale = baseline.stale(findings)
+            n_base = sum(1 for f in findings if f.baselined)
+            if n_base:
+                print(f"\n{n_base} finding(s) suppressed by {args.baseline}.",
+                      file=sys.stderr)
+            if stale:
+                print(f"{len(stale)} baseline entry/entries no longer match anything "
+                      f"— rerun with --update-baseline to prune.", file=sys.stderr)
 
-    # Worst verdict wins, and UNKNOWN outranks LEAKY because "we could not tell"
-    # must not be satisfiable by a caller that only guards against exit 1.
-    if any(d["verdict"] == UNKNOWN for d in results):
-        return 2
-    return 0 if all(d["verdict"] == "CONSTANT_TIME" for d in results) else 1
+    return findings.exit_code()
 
 
 def _cmd_fixtures(args) -> int:
@@ -229,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
 
     c = sub.add_parser(
         "check", help="check Verilog files, or bundled fixtures by name")
-    c.add_argument("file", nargs="+",
+    c.add_argument("file", nargs="*",
                    help="one or more .v paths, or names of bundled fixtures")
     c.add_argument("--observation", help="completion signal (default: from manifest, else 'done')")
     c.add_argument("--secret", action="append", default=[],
@@ -239,6 +280,14 @@ def main(argv: list[str] | None = None) -> int:
                    help="emit the verdict(s) as JSON")
     c.add_argument("--sarif", action="store_true",
                    help="emit SARIF 2.1.0 for GitHub code scanning")
+    c.add_argument("--netlist", metavar="JSON",
+                   help="analyse a Yosys JSON netlist instead of Verilog source; "
+                        "handles hierarchical designs the source parser must refuse")
+    c.add_argument("--top", help="top module in the netlist (default: the one Yosys marked)")
+    c.add_argument("--baseline", metavar="FILE",
+                   help="accept the findings recorded in FILE; fail only on new ones")
+    c.add_argument("--update-baseline", action="store_true",
+                   help="write the current findings to the baseline file and exit 0")
     c.set_defaults(func=_cmd_check)
 
     f = sub.add_parser("fixtures", help="list the bundled fixtures and where they live")

@@ -117,18 +117,36 @@ class UndrivenObservation(AnalysisRefused):
 # Constructs that create dependency edges this parser cannot follow.  Each is a
 # refusal, not a warning: see the module docstring for why partial analysis of a
 # design containing one is unsound rather than merely incomplete.
-_UNSUPPORTED: tuple[tuple[str, re.Pattern[str]], ...] = (
+#
+# The third element is a *required literal*: a plain substring that must appear in
+# the source for the pattern to have any chance of matching.  `None` means the
+# pattern is scanned unconditionally.
+#
+# The literal is a pure optimisation and it is safe by construction, because every
+# pattern here is an anchored keyword -- `\bfor\b` cannot match text that does not
+# contain "for".  It matters because Python's `re` scans a word boundary character
+# by character, so each of these costs ~10 ms on a 1.5 MB source whether or not the
+# keyword is present, while `"for" in src` is a memchr-backed scan roughly 15x
+# faster.  Ordinary RTL contains none of these keywords, so the common case skips
+# almost every regex.  Measured on a 50k-signal source: scanner 87 ms -> 25 ms.
+#
+# A file that genuinely does contain "for" pays the full price. This speeds up the
+# clean case, not the worst case, and makes no difference to any verdict.
+_UNSUPPORTED: tuple[tuple[str, re.Pattern[str], str | None], ...] = (
     # `sub u1 (.a(x))` -- the submodule body, and every edge through it, is unread.
-    ("module instantiation", re.compile(r"(?m)^[ \t]*([A-Za-z_]\w*)[ \t]+(?:#\s*\([^)]*\)[ \t]*)?([A-Za-z_]\w*)[ \t]*\(")),
-    ("for loop", re.compile(r"\bfor\b\s*\(")),
-    ("generate block", re.compile(r"\bgenerate\b")),
-    ("function definition", re.compile(r"\bfunction\b")),
-    ("task definition", re.compile(r"\btask\b")),
-    ("while loop", re.compile(r"\bwhile\b")),
-    ("repeat loop", re.compile(r"\brepeat\b")),
-    ("forever loop", re.compile(r"\bforever\b")),
+    # No usable literal: this matches a shape, not a keyword.
+    ("module instantiation",
+     re.compile(r"(?m)^[ \t]*([A-Za-z_]\w*)[ \t]+(?:#\s*\([^)]*\)[ \t]*)?([A-Za-z_]\w*)[ \t]*\("),
+     None),
+    ("for loop", re.compile(r"\bfor\b\s*\("), "for"),
+    ("generate block", re.compile(r"\bgenerate\b"), "generate"),
+    ("function definition", re.compile(r"\bfunction\b"), "function"),
+    ("task definition", re.compile(r"\btask\b"), "task"),
+    ("while loop", re.compile(r"\bwhile\b"), "while"),
+    ("repeat loop", re.compile(r"\brepeat\b"), "repeat"),
+    ("forever loop", re.compile(r"\bforever\b"), "forever"),
     # A macro can hide an entire guard expression behind one token.
-    ("preprocessor directive", re.compile(r"`(?!timescale\b)[A-Za-z_]\w*")),
+    ("preprocessor directive", re.compile(r"`(?!timescale\b)[A-Za-z_]\w*"), "`"),
 )
 
 
@@ -140,7 +158,11 @@ def unsupported_constructs(src: str) -> list[tuple[str, int, str]]:
     """
     stripped = strip_comments(src)
     found: list[tuple[str, int, str]] = []
-    for name, pat in _UNSUPPORTED:
+    for name, pat, literal in _UNSUPPORTED:
+        # Cheap substring gate before the expensive word-boundary scan. See the
+        # comment on _UNSUPPORTED for why this cannot change a verdict.
+        if literal is not None and literal not in stripped:
+            continue
         for m in pat.finditer(stripped):
             # `always @(...)`, `if (...)` and friends have the IDENT IDENT '(' shape too.
             if name == "module instantiation" and (
@@ -453,15 +475,15 @@ class Verdict:
         return d
 
 
-def analyse(src: str, observation: str, secrets: list[str],
-            module_name: str | None = None) -> Verdict:
-    """Decide constant-timeness of `observation` with respect to `secrets`.
+def verdict_for(mod: Module, observation: str, secrets: list[str]) -> Verdict:
+    """Decide a verdict from an already-built dependency graph.
 
-    Raises rather than guessing: `UnsupportedConstruct` if the source is outside the
-    readable subset, `UndrivenObservation` if nothing drives the observation.  Use
-    `check` for a non-raising call that reports those as UNKNOWN.
+    Shared by both frontends: the RTL parser and the Yosys netlist reader produce a
+    `Module`, and everything after that -- the undriven/unknown-observation refusals,
+    the cone walk, the secret intersection -- is identical. Keeping it in one place is
+    what makes the differential test between the two frontends meaningful, since any
+    divergence has to come from the parsing, not from the analysis.
     """
-    mod = parse(src, module_name)
     if observation not in mod.deps and observation not in mod.outputs:
         raise UnknownObservation(observation, mod.name, mod.outputs)
     # Declared as an output but never assigned anywhere the parser looked: no driver
@@ -483,6 +505,17 @@ def analyse(src: str, observation: str, secrets: list[str],
     )
 
 
+def analyse(src: str, observation: str, secrets: list[str],
+            module_name: str | None = None) -> Verdict:
+    """Decide constant-timeness of `observation` with respect to `secrets`.
+
+    Raises rather than guessing: `UnsupportedConstruct` if the source is outside the
+    readable subset, `UndrivenObservation` if nothing drives the observation.  Use
+    `check` for a non-raising call that reports those as UNKNOWN.
+    """
+    return verdict_for(parse(src, module_name), observation, secrets)
+
+
 def check(src: str, observation: str, secrets: list[str],
           module_name: str | None = None) -> Verdict:
     """`analyse`, but a refusal becomes an UNKNOWN verdict instead of an exception.
@@ -491,8 +524,39 @@ def check(src: str, observation: str, secrets: list[str],
     agent -- where one unreadable file should not abort the run.  UNKNOWN is never
     silent: it carries the reason, and it is not constant-time.
     """
+    return _refusal_to_unknown(
+        lambda: analyse(src, observation, secrets, module_name),
+        observation, secrets, module_name,
+    )
+
+
+def analyse_netlist(path, observation: str, secrets: list[str],
+                    top: str | None = None) -> Verdict:
+    """Analyse a Yosys JSON netlist. Raises on refusal, like `analyse`.
+
+    This is the frontend for hierarchical designs: after `flatten`, the constructs
+    the RTL parser refuses have been elaborated away, so designs that can only get
+    UNKNOWN from the source path get a real verdict here.
+    """
+    from .netlist import load_netlist
+
+    return verdict_for(load_netlist(path, top), observation, secrets)
+
+
+def check_netlist(path, observation: str, secrets: list[str],
+                  top: str | None = None) -> Verdict:
+    """`analyse_netlist`, with refusals reported as UNKNOWN."""
+    return _refusal_to_unknown(
+        lambda: analyse_netlist(path, observation, secrets, top),
+        observation, secrets, top,
+    )
+
+
+def _refusal_to_unknown(fn, observation: str, secrets: list[str],
+                        module_name: str | None) -> Verdict:
+    """Run `fn`, turning any `AnalysisRefused` into an UNKNOWN verdict."""
     try:
-        return analyse(src, observation, secrets, module_name)
+        return fn()
     except AnalysisRefused as e:
         return Verdict(
             module=module_name or "?",

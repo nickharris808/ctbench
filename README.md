@@ -56,6 +56,15 @@ ctbench check rtl/*.v --secret key --secret nonce
 # Emit SARIF 2.1.0 so findings land in GitHub code scanning
 ctbench check rtl/*.v --secret key --sarif > ctbench.sarif
 
+# Hierarchical design? Analyse the synthesised netlist instead
+yosys -q -p 'read_verilog rtl/*.v; hierarchy -top aes_core; proc; flatten; \
+             opt_clean; write_json build/aes.json'
+ctbench check --netlist build/aes.json --secret key
+
+# Adopting on an existing codebase: accept what is there, fail only on new findings
+ctbench check rtl/*.v --secret key --baseline ctbench-baseline.json --update-baseline
+ctbench check rtl/*.v --secret key --baseline ctbench-baseline.json
+
 # Where do the bundled fixtures live?
 ctbench fixtures
 ```
@@ -229,6 +238,55 @@ integrator, an auditor, a customer — to believe a constant-time result *withou
 your netlist*, that is a different problem: it needs a proof that binds to a commitment of
 a design that is never disclosed. That capability is commercial and is not part of this
 package. Everything here operates on designs you already control.
+
+## Hierarchical designs: the netlist frontend
+
+The source parser reads one flat module and refuses everything else, which is correct
+and, on real designs, frustrating — production RTL has submodules, so the honest
+answer is usually `UNKNOWN`.
+
+Point it at a synthesised netlist instead:
+
+```bash
+yosys -q -p 'read_verilog rtl/*.v; hierarchy -top aes_core; proc; flatten; \
+             opt_clean; write_json build/aes.json'
+ctbench check --netlist build/aes.json --observation done --secret key
+```
+
+After `flatten` the constructs the source parser refuses no longer exist: `generate`
+and `for` have been unrolled, `function` inlined, macros expanded, and the hierarchy
+collapsed into one cell graph. So the netlist path answers exactly the designs the
+source path has to decline.
+
+**The two frontends agree.** They share the same cone analysis, and a test synthesises
+every scored fixture and asserts both paths reach the same verdict — a divergence
+would mean one of them is wrong, and we would not know which.
+
+**Refusal is stricter here, not looser.** A netlist is a graph of cells; an unmodelled
+cell means missing dependency edges, and a missing edge is how a leaky design comes
+back clean. So an unrecognised cell type is refused by name, and a blackbox that
+survived flattening says so. Yosys is never invoked for you — you run it, and the
+JSON is an explicit input.
+
+## Adopting on an existing codebase
+
+Day one on an existing repo shows every finding at once, which is how a new check
+gets switched off. Record what is already there, then fail only on what is new:
+
+```bash
+ctbench check rtl/*.v --secret key --baseline ctbench-baseline.json --update-baseline
+git add ctbench-baseline.json
+```
+
+A baseline entry matches one exact finding — file, module, observation, verdict, and
+the precise set of reaching secrets. **A different leak in an already-baselined file
+is still reported**, because suppressing by filename would quietly hide the next bug
+in every file anyone ever accepted.
+
+A baselined `UNKNOWN` is excluded from the exit code but is **never rewritten to
+`CONSTANT_TIME`**: it still prints as `UNKNOWN`, still counts as `UNKNOWN`, and still
+exports as `UNKNOWN`. Acknowledging that no verdict was reached is not the same as
+reaching one.
 
 ## Three verdicts, three exit codes
 
