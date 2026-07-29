@@ -318,9 +318,10 @@ They share one boundary: **everything open analyses a design you disclose in ful
 
 | Project | What it does |
 |---|---|
-| **▶ [Live demo](https://huggingface.co/spaces/nickh007/hw-verify)** | Constant-time checker in your browser — runs the real analyzer via Pyodide |
+| **▶ [Live demo](https://huggingface.co/spaces/nickh007/hw-verify)** | Constant-time checker in your browser — the real analyzer via Pyodide |
+| [**Docs & overview**](https://huggingface.co/spaces/nickh007/hw-verify-site) | What the toolkit proves, and what it refuses to answer |
 | [`hw-verify`](https://github.com/nickharris808/hw-verify) | One install, one command, all three checkers |
-| **`ctbench`** (you are here) | Matched-pair constant-time RTL benchmark + leaderboard |
+| **`ctbench`** (you are here) | Matched-pair constant-time RTL benchmark + [leaderboard](https://github.com/nickharris808/ctbench#the-leaderboard) |
 | [`patchproof`](https://github.com/nickharris808/patchproof) | Prove a bounds-check fix eliminates *every* violating input |
 | [`patchproof-verify`](https://github.com/nickharris808/patchproof-verify) | Re-check its certificates in Rust, with no shared code |
 | [`ct-mask`](https://github.com/nickharris808/ct-mask) | First-order masking verification by two certificates |
@@ -332,6 +333,15 @@ They share one boundary: **everything open analyses a design you disclose in ful
 the design — a verdict bound to a commitment of a design that stays hidden — is a
 different problem and a commercial one. It is not in any of these packages.
 <!-- portfolio:end -->
+
+## Citation
+
+If you use this in academic work, please cite it — [CITATION.cff](CITATION.cff) has
+the metadata, and GitHub renders a "Cite this repository" button from it.
+
+## Contributing
+
+The most valuable contribution is **a fixture we get wrong**. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
