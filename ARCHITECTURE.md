@@ -103,10 +103,23 @@ would drift. **A new output format is a method on `Findings`**, not a new loop.
 
 ## Performance shape
 
-Linear in design size: ~4.6 µs/signal, so a 100 000-signal netlist is about half a
-second. The construct scanner was 38 % of runtime until each pattern was gated behind a
-plain substring test (3.4× on the scanner). There is no cache and no parallelism yet;
-both are listed in the roadmap and neither is currently a bottleneck.
+Linear in design size. The construct scanner was gated behind a plain substring test per
+pattern; re-measured with a committed harness that is **≈3.5×** on the largest committed
+fixture and **≈1.75×** on the whole committed corpus — the ratio depends on what you scan,
+so it is quoted with the fixture named. See the table in `../README.md` and regenerate with
+`python3 benchmarks/bench_oss_ctbench.py`. There is no cache and no parallelism yet; both
+are listed in the roadmap and neither is currently a bottleneck.
+
+> **Corrected 2026-07-30.** This paragraph previously read *"~4.6 µs/signal, so a 100 000-
+> signal netlist is about half a second. The construct scanner was 38 % of runtime … (3.4×
+> on the scanner)."* Three problems, kept visible rather than quietly edited:
+> - **~~3.4×~~** was the same unrecorded run as `README.md`'s ~~3.37×~~, rounded differently
+>   on a second public surface — one measurement presented as two.
+> - **~~~0.5 s at 100 000 signals~~ was an extrapolation**, not a measurement: it was
+>   `4.6 µs × 100 000`, and no 100 000-signal fixture exists in this repository to check it
+>   against. **Retracted.**
+> - **~~38 % of runtime~~** has no committed profiler output behind it. **Retracted** pending
+>   a regenerable profile.
 
 ## Testing philosophy
 
